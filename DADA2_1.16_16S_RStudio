@@ -1,0 +1,1453 @@
+title: "Cora 16S Analysis_commercial greenhouse_CT"
+output: html_notebook
+date: "July 30, 2020, updated 7 March 2022"
+output:
+  html_document:
+  df_print: paged
+
+``{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+ 
+
+```{r}
+
+```
+``{r install packages}
+###
+
+install.packages("ape",repos="https://cloud.r-project.org",quiet=TRUE)
+
+if (!requireNamespace("BiocManager", quietly = TRUE))
+  install.packages("BiocManager")
+
+BiocManager::install("dada2")
+
+
+if (!requireNamespace("BiocManager", quietly = TRUE))
+  install.packages("BiocManager")
+
+BiocManager::install("ShortRead")##
+
+if (!requireNamespace("BiocManager", quietly = TRUE))
+  install.packages("BiocManager")
+
+BiocManager::install("Biostrings")##
+
+if (!requireNamespace("BiocManager", quietly = TRUE))
+  install.packages("BiocManager")
+
+BiocManager::install("phyloseq")
+
+# Install
+install.packages("wesanderson")
+# Load
+
+if (!requireNamespace("BiocManager", quietly = TRUE))
+  install.packages("BiocManager")
+
+BiocManager::install("DESeq2")
+
+devtools::install_github("karthik/wesanderson")
+
+
+##
+```
+
+```{r load packages}
+library(dada2)
+library(ShortRead)
+library(Biostrings)
+library(phyloseq)
+library(ggplot2)
+library(cowplot)
+library(wesanderson)
+library(DESeq2)
+library(vegan)
+library(tidyr)
+library(rcartocolor)
+packageVersion("cowplot")
+packageVersion("ape")
+```
+
+library(dada2)
+path <- "C:/Users/csm15105work/Desktop/mapledada16S"
+fnFs <- sort(list.files(path, pattern="_R1_001.fastq", full.names = TRUE))
+fnRs <- sort(list.files(path, pattern="_R2_001.fastq", full.names = TRUE))
+sample.names <- sapply(strsplit(basename(fnFs), "_"), `[`, 1)
+plotQualityProfile(fnFs[1:2])
+plotQualityProfile(fnRs[1:2])
+filtFs <- file.path(path, "filtered", paste0(sample.names, "_F_filt.fastq.gz"))
+filtRs <- file.path(path, "filtered", paste0(sample.names, "_R_filt.fastq.gz"))
+names(filtFs) <- sample.names
+names(filtRs) <- sample.names
+out <- filterAndTrim(fnFs, filtFs, fnRs, filtRs, truncLen=c(240,160),
+                     maxN=0, maxEE=c(2,2), truncQ=2, rm.phix=TRUE,
+                     compress=TRUE, multithread=FALSE)
+head(out)
+# On Windows set multithread=FALSE
+
+errF <- learnErrors(filtFs, multithread=TRUE)
+errR <- learnErrors(filtRs, multithread=TRUE)
+plotErrors(errF, nominalQ=TRUE)
+dadaFs <- dada(filtFs, err=errF, multithread=TRUE)
+dadaRs <- dada(filtRs, err=errR, multithread=TRUE)
+dadaFs[[1]]
+mergers <- mergePairs(dadaFs, filtFs, dadaRs, filtRs, verbose=TRUE)
+head(mergers[[1]])
+
+seqtab <- makeSequenceTable(mergers)
+dim(seqtab)
+table(nchar(getSequences(seqtab)))
+seqtab.nochim <- removeBimeraDenovo(seqtab, method="consensus", multithread=TRUE, verbose=TRUE)
+dim(seqtab.nochim)
+sum(seqtab.nochim)/sum(seqtab)
+getN <- function(x) sum(getUniques(x))
+track <- cbind(out, sapply(dadaFs, getN), sapply(dadaRs, getN), sapply(mergers, getN), rowSums(seqtab.nochim))
+# If processing a single sample, remove the sapply calls: e.g. replace sapply(dadaFs, getN) with getN(dadaFs)
+colnames(track) <- c("input", "filtered", "denoisedF", "denoisedR", "merged", "nonchim")
+rownames(track) <- sample.names
+head(track)
+taxa <- assignTaxonomy(seqtab.nochim, "C:/Users/csm15105work/Desktop/mapledada16S/silva_nr_v138_train_set.fa", multithread=TRUE)
+taxa <- addSpecies(taxa, "C:/Users/csm15105work/Desktop/mapledada16S/silva_species_assignment_v138.fa")
+taxa.print <- taxa # Removing sequence rownames for display only
+rownames(taxa.print) <- NULL
+head(taxa.print)
+library(phyloseq); packageVersion("phyloseq")
+
+##metadata<-read.table("Maplemeta.csv", sep=",", header=TRUE, row.names=c(1))##
+
+track
+seqtab.nochim
+write.csv(seqtab.nochim, "C:/Users/csmcg/Desktop/mapledada16S/countseq.csv")
+
+setwd("C:/Users/csmcg/Downloads/16S_new")
+
+seqtab.nochim_16s <- read.csv("countseq16S.csv", row.names = 1)
+seqtab.nochim_16s <- as.matrix(seqtab.nochim_16s)
+
+save(taxa, file = "taxa.RData")
+save(taxa.print, file = "taxa.print.RData")
+
+## us this to load the RData files I genereated with the unite annotations
+load("taxa.RData")
+load("taxa.print.RData")
+```
+
+```{r rename asvs}
+asv_seqs <- colnames(seqtab.nochim_16s)
+asv_headers <- vector(dim(seqtab.nochim_16s)[2], mode="character")
+
+for (i in 1:dim(seqtab.nochim_16s)[2]) {
+  asv_headers[i] <- paste(">ASV", i, sep="_")
+}
+
+# making and writing out a fasta of our final ASV seqs:
+asv_fasta <- c(rbind(asv_headers, asv_seqs))
+write(asv_fasta, "ASVs.fa")
+
+# count table:
+asv_tab <- t(seqtab.nochim_16s)
+row.names(asv_tab) <- sub(">", "", asv_headers)
+# write.table(asv_tab, "ASVs_counts2.tsv", sep="\t", quote=F, col.names=NA)
+
+# tax table:
+asv_tax <- taxa
+row.names(asv_tax) <- sub(">", "", asv_headers)
+# write.table(asv_tax, "ASVs_taxonomy.tsv", sep="\t", quote=F, col.names=NA)
+
+
+```
+
+```{r make phyloseq object} ##Metadata##
+samples.out_16s <- rownames(seqtab.nochim_16s)
+samples_16s <- c("CleanFoam116S", "CleanFoam216S", "CleanFoam316S","HosePostFilter16S",
+                 "LettuceRootsPond1116S", "LettuceRootsPond2316S", "LettuceRootsPond316S","LettuceRootsPond916S",
+                 "MatureFoam116S", "MatureFoam216S", "MatureFoam316S",
+                 "Municipal16S",
+                 "Pond1116S", "Pond316S", "Pond916S",
+                 "PostharvestTray116S", "PostharvestTray216S", "PostharvestTray316S",
+                 "SeedlingTray116S", "SeedlingTray216S", "SeedlingTray316S",
+                 "SowStation116S", "SowStation216S", "SowStation316S",
+                 "TrayTransplant116S", "TrayTransplant216S", "TrayTransplant316S", "TroughLiner116S", "TroughLiner216S", "TroughLiner316S")
+site <- c("Post-sanitation surface", "Post-sanitation surface", "Post-sanitation surface", "Post-carbon filter", 
+          "Transplant root", "Seedling root", "Mature root", "Mature root", 
+          "Mature surface", "Mature surface", "Mature surface",
+          "Municipal water", "Nutrient solution", "Nutrient solution", "Nutrient solution",
+          "Harvest surface", "Harvest surface", "Harvest surface",
+          "Seedling surface", "Seedling surface", "Seedling surface",
+          "Sowing surface", "Sowing surface", "Sowing surface",
+          "Transplant surface", "Transplant surface", "Transplant surface", 
+          "Liner surface", "Liner surface", "Liner surface")
+treatment <- c("Surface", "Surface", "Surface", "Solution",
+               "Root", "Root", "Root", "Root",
+               "Surface", "Surface", "Surface",
+               "Solution", "Solution", "Solution", "Solution", "Surface", "Surface", "Surface",
+               "Surface", "Surface", "Surface",
+               "Surface", "Surface", "Surface",
+               "Surface", "Surface", "Surface",
+               "Surface", "Surface", "Surface")
+               
+Stage <- c("Late", "Late", "Late", "Early", 
+          "Early", "Early", "Late", "Late", 
+          "Late", "Late", "Late",
+          "Early", "Late", "Late", "Late",
+          "Late", "Late", "Late",
+          "Early", "Early", "Early",
+          "Early", "Early", "Early",
+          "Early", "Early", "Early", 
+          "Late", "Late", "Late")
+
+samdf_16s <- data.frame(merge=samples_16s, Production.Stage=site, treatment=treatment, stage=Stage)
+# write.table(samdf_its, "samdf_its.txt", quote = FALSE, row.names = FALSE)
+rownames(samdf_16s) <- samples.out_16s
+
+ps_16s <- phyloseq(otu_table(seqtab.nochim_16s, taxa_are_rows=FALSE),
+                   sample_data(samdf_16s),
+                   tax_table(taxa))
+ps_16s <- prune_samples(sample_names(ps_16s) != "Mock", ps_16s) # Remove mock sample
+ps_16s
+``
+
+library(microbiome)
+
+
+##Rarefy to 9000##
+ps_16s_44754Prune<- prune_samples(sample_sums(ps_16s)>44753, ps_16s)
+
+
+ps_16s_rarefy <-rarefy_even_depth(ps_16s_44754Prune, sample.size = min(sample_sums(ps_16s)), rngseed = FALSE, replace = TRUE, trimOTUs = TRUE, verbose = TRUE)
+
+ps_16s_rarefy
+
+# Extract abundance matrix from the phyloseq object
+OTU1 = as(otu_table(ps_16s), "matrix")
+# transpose if necessary
+if(taxa_are_rows(ps_16s)){OTU1 <- t(OTU1)}
+# Coerce to data.frame
+OTUdf = as.data.frame(OTU1)
+#Create an object of the row sums from the data frame
+rowSums <- rowSums(OTUdf)
+#write the csv file of that object
+write.csv(rowSums, file="rarefy_cutoff.csv")
+ 
+write.csv(metadata, file="metadata73021.csv")
+
+
+
+##Export ASV and genus excel sheet##
+ASV = as(otu_table(ps_16s), "matrix")
+# transpose if necessary
+if(taxa_are_rows(ps_16s)){ASV <- t(ASV)}
+# Coerce to data.frame
+ASVdf = as.data.frame(ASV)
+write.csv(ASVdf, file='ASV_maple_16s.csv')
+
+
+glom <- tax_glom(ps_16s, taxrank = 'Genus')
+#create dataframe from phyloseq object
+dat <- psmelt(glom)
+#convert Class to a character vector from a factor
+dat$Genus <- as.character(dat$Genus)
+#aggregate
+Genus_abundance <- aggregate(Abundance~Sample+Genus, dat, FUN=sum)
+#reorganize the table so that each Class is a column
+library(reshape)
+Genus_abundance <- cast(Genus_abundance, Sample ~ Genus)
+#how to transpose file
+Genus_abundance <- t(Genus_abundance)
+write.csv(Genus_abundance, file='Genus_abundance.csv')
+
+#########
+##Phylum##
+glom <- tax_glom(ps_16s, taxrank = 'Phylum')
+#create dataframe from phyloseq object
+dat <- psmelt(glom)
+#convert Class to a character vector from a factor
+dat$Phylum <- as.character(dat$Phylum)
+#aggregate
+Phylum_abundance <- aggregate(Abundance~Sample+Phylum, dat, FUN=sum)
+#reorganize the table so that each Class is a column
+library(reshape)
+Phylum_abundance <- cast(Phylum_abundance, Sample ~ Phylum)
+#how to transpose file
+Phylum_abundance <- t(Phylum_abundance)
+write.csv(Phylum_abundance, file='Phylum_abundance.csv')
+
+
+####Family#####
+glom <- tax_glom(ps_16s, taxrank = 'Family')
+#create dataframe from phyloseq object
+dat <- psmelt(glom)
+#convert Class to a character vector from a factor
+dat$Family <- as.character(dat$Family)
+#aggregate
+Family_abundance <- aggregate(Abundance~Sample+Family, dat, FUN=sum)
+#reorganize the table so that each Class is a column
+library(reshape)
+Family_abundance <- cast(Family_abundance, Sample ~ Family)
+#how to transpose file
+Family_abundance <- t(Family_abundance)
+write.csv(Family_abundance, file='Family_abundance.csv')
+
+########
+
+
+##Alpha diversity plots##
+
+melted_16s <- psmelt(ps_16s)
+
+plot_richness(ps_16s, x="treatment", measures=c("Shannon", "Simpson"), color="Production.Stage") + geom_point(size=3.5)
+plot_richness(ps_its, x="site", measures=c("Shannon", "Simpson", "Observed"), color="site") + geom_point(size=5)
+plot_richness(ps_its, x="site", measures=c("Shannon", "Simpson", "Observed"), shape ="site" + geom_point(size=7))
+
+
+
+
+newSTorder =  c("Sowing surface", "Seedling surface", "Transplant surface", "Mature surface", "Liner surface", "Harvest surface", "Post-sanitation surface", "Municipal water", "Post-carbon filter", "Nutrient solution", "Seedling root", "Transplant root", "Mature root")
+
+newSTorder2 =  c("Surface", "Solution", "Root")
+
+p$data$treatment <- as.character(p$data$treatment)
+p$data$treatment <- factor(p$data$treatment, levels=newSTorder2)
+
+p$data$Production.Stage <- as.character(p$data$Production.Stage)
+p$data$Production.Stage <- factor(p$data$Production.Stage, levels=newSTorder)
+
+p               
+
+##Group by type of sample##USE THIS ONE###
+
+p <- plot_richness(ps_16s, x=("treatment"), measures=c("Shannon", "Simpson"), color = "Production.Stage") + geom_point(size=5) + theme_bw() +
+  scale_shape_manual(values=c(1, 2)) +  theme(axis.text.x = element_text(size = 11, angle = 45, hjust = 1, vjust = 1)) +
+  theme(axis.text.y = element_text(size  = 11)) + theme(strip.text=element_text(size=11)) +
+  xlab("") +
+  theme(panel.grid.major.y = element_blank(), panel.grid.minor.y = element_blank()) +
+  theme(legend.title=element_blank()) +
+  scale_color_manual(values = my.colors12)+
+  theme(strip.text.x = element_text(size = 11)) + theme(legend.text = element_text(size = 11))
+  
+  
+  
+my.colors12<- colorRampPalette (c('pink2', 'red3','orange2', 'purple3', '#117733', 'yellow3', '#661100', '#ABDDDE', 'tan4', 'darkblue', 'cornsilk3', 'grey45', 'gray1'))(13)
+  
+  
+  
+  
+  
+my.colors4 <- colorRampPalette (c('#ECCBAE', 'burlywood3','#D69C4E', '#9C964A', 'tan4', '#81A88D', '#046C9A', '#ABDDDE', '#46ACC8', 'darkblue', '#446455', 'grey67', 'gray1'))(13)
+  
+  
+  
+  
+##Group individually as production stages or site##
+plot_richness(ps_16s, x=("Production.Stage"), measures=c("Shannon", "Simpson"), color = "Production.Stage") + geom_point(size=2) +
+  scale_shape_manual(values=c(1, 2)) +  theme(axis.text.x = element_text(size  = 11, angle = 45, hjust = 1, vjust = 1)) +
+  theme(axis.text.y = element_text(size  = 11)) + theme(strip.text=element_text(size=11)) +
+  xlab("") +
+  theme(panel.grid.major.y = element_blank(), panel.grid.minor.y = element_blank()) +
+  theme(legend.title=element_blank()) +
+  scale_color_manual(values = wes_palette("Darjeeling2", n = 13, type = "continuous"))+
+  theme(strip.text.x = element_text(size = 11)) + theme(legend.text = element_text(size = 11))
+  
+
+est_rich <- estimate_richness(ps_16s,  measures=c("Shannon", "Simpson"))
+est_rich$merge <- rownames(est_rich)
+samdf_16s$merge <- rownames(samdf_16s)
+est_rich <- merge(est_rich, samdf_16s, by = "merge")
+est_rich <- melt(est_rich)
+  
+
+
+##***Alpha diversity, richness***##
+est_rich <- estimate_richness(ps_16s,  measures=c("Shannon", "Simpson"))
+est_rich$merge <- rownames(est_rich)
+samdf_16s$merge <- rownames(samdf_16s)
+est_rich <- merge(est_rich, samdf_16s, by = "merge")
+est_rich <- melt(est_rich)
+
+library(reshape) 
+reshape::melt()
+
+
+
+##****Boxplot##
+
+ggplot(est_rich, aes(x = treatment, y = value, color = Production.Stage)) +
+  geom_boxplot(size = 2, outlier.colour="red", outlier.shape=8,
+                outlier.size=4) +
+  scale_shape_manual(values=c(1, 2, 3)) +
+  xlab("") + ylab("Alpha Diversity Measure") +
+  theme(panel.grid.major.y = element_blank(), panel.grid.minor.y = element_blank()) +
+  theme(legend.title=element_blank()) +
+  scale_color_manual(values = wes_palette("Darjeeling2", n = 13, type = "continuous")) +
+  theme(axis.text.x = element_text(size  = 9, angle = 90, hjust = 1, vjust = 0.5))
+
+ggplot(est_rich, aes(x = treatment, y = value, color = Production.Stage)) +
+  geom_boxplot(size = 2, outlier.colour="red", outlier.shape=8,
+                outlier.size=4) + geom_dotplot(binaxis='y', stackdir='center', dotsize=0.5,
+                 position=position_dodge(1)) +
+  scale_shape_manual(values=c(1, 2, 3)) +
+  xlab("") + ylab("Alpha Diversity Measure") +
+  theme(panel.grid.major.y = element_blank(), panel.grid.minor.y = element_blank()) +
+  theme(legend.title=element_blank()) +
+  scale_color_manual(values = wes_palette("Darjeeling2", n = 13, type = "continuous")) +
+  theme(axis.text.x = element_text(size  = 9, angle = 90, hjust = 1, vjust = 0.5))
+  
+  
+  geom_jitter(shape=16, position=position_jitter(0.2))
+  
+  
+ggplot(est_rich, aes(x = treatment, y = value, color = Production.Stage)) +
+  geom_boxplot(size = 2, outlier.colour="red", outlier.shape=8,
+                outlier.size=4) + geom_jitter(shape=16, position=position_jitter(0.2)) +
+  scale_shape_manual(values=c(1, 2, 3)) +
+  xlab("") + ylab("Alpha Diversity Measure") +
+  theme(panel.grid.major.y = element_blank(), panel.grid.minor.y = element_blank()) +
+  theme(legend.title=element_blank()) +
+  scale_color_manual(values = wes_palette("Darjeeling2", n = 13, type = "continuous")) +
+  theme(axis.text.x = element_text(size  = 9, angle = 90, hjust = 1, vjust = 0.5))
+
+
+##Save file#
+#ggsave("plots/bacteria_alpha_diversity_site.pdf", dpi = 600)
+
+Sys.time()
+Sys.Date()
+```
+
+##Genus## ##BarPlot##
+
+melted_16s <- psmelt(ps_16s)
+
+## housekeeping - repeat for each taxa level
+# melted_nc$Genus <- gsub('g__', '', melted_nc$Genus)
+
+#facet for multiple treatments##
+# facet_grid(. ~ site)
+
+##Top5 Genus##
+melted_16s$Genus <- gsub('g__', '', melted_16s$Genus)
+genus_counts <- aggregate(melted_16s$Abundance, by=list(Category=melted_16s$Genus), FUN=sum)
+gc_reorder <- genus_counts[order(-genus_counts$x),]
+top5_genus <- NULL
+top5_genus$Genus <- head(gc_reorder$Category, 5)
+top5_melted <- subset(melted_its, Genus %in% top5_genus$Genus)
+
+
+ggplot(top5_melted, aes(x = Production.Stage, y = Abundance, fill = Genus)) +
+  geom_bar(stat = "identity", position = "fill") +
+  # theme(legend.position = "none") +
+  scale_y_continuous(labels = function(x) format(x, scientific = TRUE)) +
+  theme(axis.text.x = element_text(size  = 12, angle = 45, hjust = 1, vjust = 1)) +
+  xlab("")+ ylab("Relative abundance") +
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank()) +
+  scale_fill_manual(values = wes_palette("Darjeeling2", n = 11, type = "continuous")) +
+  scale_y_continuous(labels = scales::percent_format()) +
+  theme(strip.text.x = element_text(size = 12)) + theme(legend.text = element_text(size = 12))
+
+##TOP 20, all genus##
+melted_16s$Genus <- gsub('g__', '', melted_16s$Genus)
+genus_counts <- aggregate(melted_16s$Abundance, by=list(Category=melted_16s$Genus), FUN=sum)
+gc_reorder <- genus_counts[order(-genus_counts$x),]
+top20_genus <- NULL
+top20_genus$Genus <- head(gc_reorder$Category, 20)
+top20_melted <- subset(melted_16s, Genus %in% top20_genus$Genus)
+
+
+##Remove Lactuca genus and NA###
+ggplot(subset(top20_melted, Genus != "Lactuca"), aes(x = Production.Stage, y = Abundance, fill = Genus), subset = !(Genus == 'NA')) +
+  geom_bar(stat = "identity", position = "fill") +
+  # theme(legend.position = "none") +
+  scale_y_continuous(labels = function(x) format(x, scientific = TRUE)) +
+  theme(axis.text.x = element_text(size  = 11, angle = 45, hjust = 1, vjust = 1)) +
+  xlab("")+ ylab("Relative abundance") +
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank()) +
+  scale_fill_manual(values = wes_palette("Darjeeling2", n = 20, type = "continuous")) +
+  scale_y_continuous(labels = scales::percent_format()) +
+  theme(strip.text.x = element_text(size = 11)) + theme(legend.text = element_text(size = 11))
+
+
+ggplot(top20_melted, aes(x = Production.Stage, y = Abundance, fill = Genus)) +
+  geom_bar(stat = "identity", position = "fill") +
+  # theme(legend.position = "none") +
+  scale_y_continuous(labels = function(x) format(x, scientific = TRUE)) +
+  theme(axis.text.x = element_text(size  = 16, angle = 45, hjust = 1, vjust = 1)) +
+  xlab("")+ ylab("Relative abundance") +
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank()) +
+  scale_fill_manual(values = wes_palette("Darjeeling2", n = 20, type = "continuous")) +
+  scale_y_continuous(labels = scales::percent_format()) +
+  theme(strip.text.x = element_text(size = 16)) + theme(legend.text = element_text(size = 16))
+  
+  
+  
+####Top15_Genus#####
+melted_16s$Genus <- gsub('Allorhizobium-Neorhizobium-Pararhizobium-Rhizobium', 'Allo-Neor-Para-Rhizo', melted_16s$Genus)
+genus_counts <- aggregate(melted_16s$Abundance, by=list(Category=melted_16s$Genus), FUN=sum)
+gc_reorder <- genus_counts[order(-genus_counts$x),]
+top15_genus <- NULL
+top15_genus$Genus <- head(gc_reorder$Category, 15)
+top15_melted <- subset(melted_16s, Genus %in% top15_genus$Genus)
+
+
+####Top50_Genus#####
+melted_16s$Genus <- gsub('Allorhizobium-Neorhizobium-Pararhizobium-Rhizobium', 'Allo-Neor-Para-Rhizo', melted_16s$Genus)
+genus_counts <- aggregate(melted_16s$Abundance, by=list(Category=melted_16s$Genus), FUN=sum)
+gc_reorder <- genus_counts[order(-genus_counts$x),]
+top50_genus <- NULL
+top50_genus$Genus <- head(gc_reorder$Category, 50)
+top50_melted <- subset(melted_16s, Genus %in% top50_genus$Genus)
+
+
+
+##Remove Lactuca genus and NA###
+ggplot(subset(top15_melted, Genus != "Lactuca"), aes(x = Production.Stage, y = Abundance, fill = Genus), subset = !(Genus == 'NA')) +
+  geom_bar(stat = "identity", position = "fill") +
+  # theme(legend.position = "none") +
+  scale_y_continuous(labels = function(x) format(x, scientific = TRUE)) +
+  theme(axis.text.x = element_text(size  = 12, angle = 45, hjust = 1, vjust = 1)) +
+  xlab("")+ ylab("Relative abundance") +
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank()) +
+  scale_fill_manual(values = wes_palette("Darjeeling2", n = 15, type = "continuous")) +
+  scale_y_continuous(labels = scales::percent_format()) +
+  theme(strip.text.x = element_text(size = 12)) + theme(legend.text = element_text(size = 12))
+
+
+ggplot(top15_melted, aes(x = Production.Stage, y = Abundance, fill = Genus)) +
+  geom_bar(stat = "identity", position = "fill") +
+  # theme(legend.position = "none") +
+  scale_y_continuous(labels = function(x) format(x, scientific = TRUE)) +
+  theme(axis.text.x = element_text(size  = 12, angle = 45, hjust = 1, vjust = 1)) +
+  xlab("")+ ylab("Relative abundance") +
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank()) +
+  scale_fill_manual(values = wes_palette("Darjeeling2", n = 15, type = "continuous")) +
+  scale_y_continuous(labels = scales::percent_format()) +
+  theme(strip.text.x = element_text(size = 12)) + theme(legend.text = element_text(size = 12))
+
+##Save plots##
+#ggsave("plots/fungi_top10_heatshock_by_part_relabun.tiff", dpi = 300)
+
+
+##Family## ##Bar Plot##
+melted_16s <- psmelt(ps_16s)
+
+melted_16s$Family <- gsub('s__', '', melted_16s$Family)
+##Top15 Family##
+family_counts <- aggregate(melted_16s$Abundance, by=list(Category=melted_16s$Family), FUN=sum)
+sp_reorder <- family_counts[order(-family_counts$x),]
+top15_family <- NULL
+top15_family$Family <- head(sp_reorder$Category, 15)
+top15_melted <- subset(melted_16s, Family %in% top15_family$Family)
+
+
+ggplot(top15_melted, aes(x = Production.Stage, y = Abundance, fill = Family)) +
+  geom_bar(stat = "identity", position = "fill") +
+  # theme(legend.position = "none") +
+  scale_y_continuous(labels = function(x) format(x, scientific = TRUE)) +
+  theme(axis.text.x = element_text(size  = 12, angle = 45, hjust = 1, vjust = 1)) +
+  xlab("")+ ylab("Relative abundance") +
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank()) +
+  scale_fill_manual(values = wes_palette("Rushmore1", n = 15, type = "continuous")) +
+  scale_y_continuous(labels = scales::percent_format()) +
+  theme(strip.text.x = element_text(size = 12)) + theme(legend.text = element_text(size = 12))
+
+##Phyla## ##Bar Plot##
+melted_16s <- psmelt(ps_16s)
+
+melted_16s$Phylum <- gsub('s__', '', melted_16s$Phylum)
+##Top15 Phylum##
+phylum_counts <- aggregate(melted_16s$Abundance, by=list(Category=melted_16s$Phylum), FUN=sum)
+sp_reorder <- phylum_counts[order(-phylum_counts$x),]
+top15_phylum <- NULL
+top15_phylum$Phylum <- head(sp_reorder$Category, 15)
+top15_melted <- subset(melted_16s, Phylum %in% top15_phylum$Phylum)
+
+
+ggplot(top15_melted, aes(x = Production.Stage, y = Abundance, fill = Phylum)) +
+  geom_bar(stat = "identity", position = "fill") +
+  # theme(legend.position = "none") +
+  scale_y_continuous(labels = function(x) format(x, scientific = TRUE)) +
+  theme(axis.text.x = element_text(size  = 12, angle = 45, hjust = 1, vjust = 1)) +
+  xlab("")+ ylab("Relative abundance") +
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank()) +
+  scale_fill_manual(values = wes_palette("Darjeeling2", n = 15, type = "continuous")) +
+  scale_y_continuous(labels = scales::percent_format()) +
+  theme(strip.text.x = element_text(size = 12)) + theme(legend.text = element_text(size = 12))
+
+
+
+samdf_16s <- data.frame(merge=samples_16s, Production.Stage=site, treatment=treatment)
+
+###ORDINATION PLOTS, REVISED###
+
+title: "Cora's ordination plots"
+author: "Artemis S. Louyakis"
+date: 2022.04.08
+output: html_notebook
+---
+
+```{r load packages}
+library(phyloseq)
+library(ggplot2)
+library(DESeq2)
+library(vegan)
+library(wesanderson)
+library(dendextend)
+library(ggrepel)
+```
+
+
+```{r coras environment}
+load("~/Downloads/R environment_ITS_maplelane_7April22.rdata")
+```
+
+
+## sent via linkedin - modified in line
+
+ps.prop_16s <- transform_sample_counts(ps_16s, function(otu) otu/sum(otu))
+ord.nmds.bray_16s <- ordinate(ps.prop_16s, method="NMDS", distance="bray")
+ord.pcoa.bray_16s <- ordinate(ps.prop_16s, method="PCoA", distance="bray")
+
+pcoa_df <- as.data.frame(ord.pcoa.bray_16s$vectors)
+pcoa_df$merge <- rownames(pcoa_df)
+pcoa_df_factors <- merge(pcoa_df, samdf_16s, by = "merge")
+
+PC1_hs <- lm(Axis.1 ~ treatment, data = pcoa_df_factors)
+summary(PC1_hs)
+
+ord.nmds.bray_16s <- ordinate(ps.prop_16s, method="PCoA", distance="bray")
+plot_ordination(ps.prop_16s, ord.pcoa.bray_16s, color="Production.Stage")
+
+colnames(ps.prop_16s@sam_data) ## this will tell you what factors you can use for color, shape, etc.
+## coloring isn't working because you don't have "site" as a column in your sample data
+##corrected:
+plot_ordination(ps.prop_16s, ord.pcoa.bray_16s, color= "Production.Stage", shape="treatment") +
+  geom_point(size=5) +
+  scale_color_manual (values = wes_palette("Darjeeling2", n = 13, type = "continuous")) +
+  theme(legend.title=element_blank()) +
+  xlab("PC1 (23.9%)") + ylab("PC2 (15.5%)") +
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank())
+
+
+# Here is the code for the distance matrix with DEseq:
+# View(seqtab.nochim)
+seqmat_trans <- t(seqtab.nochim) ## your data should have samples in columns and taxa in rows
+deseq_counts <- DESeqDataSetFromMatrix(seqmat_trans, colData = samdf_16s, design = ~ treatment)
+## colData should be your metadata object and design is where you choose the factors for the differential abundance
+deseq_counts <- estimateSizeFactors(deseq_counts, type = "poscounts")
+deseq_counts_vst <- varianceStabilizingTransformation(deseq_counts)
+vst_trans_count_tab <- assay(deseq_counts_vst)
+euc_dist <- dist(t(vst_trans_count_tab))
+
+
+###DENDROGRAM###
+euc_clust <- hclust(euc_dist, method="ward.D2")
+plot(euc_clust)
+
+sample_info_tab <- samdf_16s
+euc_dend <- as.dendrogram(euc_clust, hang=0.1)
+dend_cols <- as.character(sample_info_tab$color[order.dendrogram(euc_dend)])
+labels_colors(euc_dend) <- dend_cols
+
+sample_info_tab <- samdf_16s
+euc_dend <- as.dendrogram(euc_clust, hang=-1, cex=0.6, xlab = "Height",
+     nodePar = nodePar, horiz = TRUE)
+dend_cols <- as.character(sample_info_tab$color[order.dendrogram(euc_dend)])
+labels_colors(euc_dend) <- dend_cols
+
+
+
+vst_count_phy <- otu_table(vst_trans_count_tab, taxa_are_rows=T)
+sample_info_tab_phy <- sample_data(sample_info_tab)
+vst_physeq <- phyloseq(vst_count_phy, sample_info_tab_phy)
+
+sample_names()
+
+# generating and visualizing the PCoA with phyloseq
+vst_pcoa <- ordinate(vst_physeq, method="MDS", distance="euclidean")
+eigen_vals <- vst_pcoa$values$Eigenvalues
+
+# allows us to scale the axes according to their magnitude of separating apart the samples
+# View(sample_info_tab)
+plot_ordination(vst_physeq, vst_pcoa, color="stage", shape = "treatment") +
+  geom_point(size=1) + 
+  labs(col="stage") + ## this isn't adding anything?
+  geom_label_repel(aes(label=sample_info_tab$merge)) +
+  coord_fixed(sqrt(eigen_vals[2]/eigen_vals[1])) + 
+  ggtitle("PCoA") +
+  # scale_color_manual(values=unique(sample_info_tab$color[order(sample_info_tab$stage)])) + ## i don't know what this is supposed to do, but there is no color column in the dataframe - i didn't see the code where you made that object, so i made it from your metadata file samdf_its
+  theme(legend.position="none")
+
+## new pcoa with elipses but based on your last 
+plot_ordination(vst_physeq, vst_pcoa, color="stage", shape = "treatment") +
+  geom_point(size=1) + 
+  stat_ellipse() + 
+  theme_bw() +
+  coord_fixed(sqrt(eigen_vals[2]/eigen_vals[1])) + 
+  ggtitle("PCoA") 
+
+
+####USE THIS CODE#####
+
+
+## adonis test with vegan
+ps_clean <- prune_taxa(!(taxa_names(ps_16s) %in% "-1"), ps_16s)
+ps_clean <- prune_taxa(taxa_sums(ps_clean) > 0.0, ps_clean)
+ps_clean <- transform_sample_counts(ps_clean, function(x) x/sum(x))
+ps_clean <- prune_samples(sample_sums(ps_clean) >= 0, ps_clean)
+df <- data.frame(sample_data(ps_clean))
+ps_clean_bray <- phyloseq::distance(ps_clean, method = "bray")
+adonis2(ps_clean_bray ~ treatment, data = df)
+adonis2(ps_clean_bray ~ Production.Stage, data = df)
+ps_clean_euc <- phyloseq::distance(ps_clean, method = "euclidean")
+adonis2(ps_clean_euc ~ treatment, data = df)
+adonis2(ps_clean_euc ~ Production.Stage, data = df)
+
+## pcoa using your counts and including adonis p-values 
+ps_prop <- transform_sample_counts(ps_16s, function(otu) otu/sum(otu))
+ps_prop <- prune_samples(sample_sums(ps_prop) >= 0, ps_prop)
+pcoa_euc <- ordinate(ps_prop, method="PCoA", distance="euclidean")
+pcoa_bray <- ordinate(ps_prop, method="PCoA", distance="bray")
+# pcoa_uni <- ordinate(ps_prop, method="PCoA", distance="unifrac") ## requires a tree
+# View(pcoa_bray$values)
+plot_ordination(ps_prop, pcoa_bray, color="treatment", shape = "treatment", title="Bray PCoA") +
+  theme_bw() + 
+  stat_ellipse() + 
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank()) +
+  scale_color_manual(values = wes_palette("FantasticFox1", n = 3, type = "continuous")) +
+  geom_hline(yintercept = 0, color = "lightgrey") +
+  geom_vline(xintercept = 0, color = "lightgrey")
+  
+  
+  
+plot_ordination(ps_prop, pcoa_euc, color="treatment", shape = "treatment", title="Euclidean PCoA") +
+  theme_bw() + geom_point(size=3) +
+  stat_ellipse() +  xlab("PC1 (64%)") + ylab("PC2 (18.4%)") +
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank()) +
+  scale_color_manual(values = wes_palette("FantasticFox1", n = 3, type = "continuous")) +
+  geom_hline(yintercept = 0, color = "lightgrey") +
+  geom_vline(xintercept = 0, color = "lightgrey")
+  
+  
+  
+  plot_ordination(ps_prop, pcoa_euc, color="treatment", shape = "treatment", title="Euclidean PCoA") +
+  theme_bw() + 
+  stat_ellipse() + 
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank()) +
+  scale_color_manual(values = wes_palette("FantasticFox1", n = 3, type = "continuous")) +
+  geom_hline(yintercept = 0, color = "lightgrey") +
+  geom_vline(xintercept = 0, color = "lightgrey")
+  
+  
+  
+##Previous code##
+  plot_ordination(ps.prop_its, ord.pcoa.bray_its, color= "Production.Stage", shape="treatment") +
+  geom_point(size=3) +
+  scale_color_manual (values = wes_palette("Darjeeling2", n = 12, type = "continuous")) +
+  theme(legend.title=element_blank()) +
+  xlab("PC1 (50.7%)") + ylab("PC2 (23%)") +
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank())
+  
+
+## text is from an adonis test and the pc % from the ordination object (left in case you wanted to add)
+## you can add any other ggplot lines that you want
+
+
+###MORE ORDINATION PLOTS###
+{r nmds, fig.height=4, fig.width=5}
+
+ps_prop <- transform_sample_counts(ps_16s, function(otu) otu/sum(otu))
+ps_prop <- prune_samples(sample_sums(ps_prop) >= 0, ps_prop)
+pcoa_euc <- ordinate(ps_prop, method="PCoA", distance="euclidean")
+pcoa_bray <- ordinate(ps_prop, method="PCoA", distance="bray")
+nmds_euc <- ordinate(ps_prop, method="NMDS", distance="euclidean")
+nmds_bray <- ordinate(ps_prop, method="NMDS", distance="bray")
+
+pb <- plot_ordination(ps_prop, pcoa_bray, color="treatment", shape = "treatment", title="Bray PCoA") + geom_point(size=3) +
+  theme_bw() + 
+  stat_ellipse() + 
+   theme(legend.title=element_blank()) +
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank()) +
+  scale_color_manual(values = wes_palette("FantasticFox1", n = 3, type = "continuous")) +
+  xlab("PC1 (23.9%)") + ylab("PC2 (15.5%)") +
+  geom_hline(yintercept = 0, color = "lightgrey") +
+  geom_vline(xintercept = 0, color = "lightgrey")
+
+pe <- plot_ordination(ps_prop, pcoa_euc, color="treatment", shape = "treatment", title="Euclidean PCoA") + geom_point(size=3) +
+  theme_bw() + 
+  stat_ellipse() + 
+   theme(legend.title=element_blank()) +
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank()) +
+  scale_color_manual(values = wes_palette("FantasticFox1", n = 3, type = "continuous")) +
+  xlab("PC1 (45.3%)") + ylab("PC2 (18.3%)") + 
+  geom_hline(yintercept = 0, color = "lightgrey") +
+  geom_vline(xintercept = 0, color = "lightgrey")
+  
+
+nb <- plot_ordination(ps_prop, nmds_bray, color="treatment", shape = "treatment", title="Bray NMDS") + geom_point(size=3) +
+  theme_bw() + 
+  stat_ellipse() + 
+   theme(legend.title=element_blank()) +
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank()) +
+  scale_color_manual(values = wes_palette("FantasticFox1", n = 3, type = "continuous")) +
+  geom_hline(yintercept = 0, color = "lightgrey") +
+  geom_vline(xintercept = 0, color = "lightgrey")
+  
+
+ne <- plot_ordination(ps_prop, nmds_euc, color="treatment", shape = "treatment", title="Euclidean NMDS") + geom_point(size=3) +
+  theme_bw() + 
+  stat_ellipse() + 
+   theme(legend.title=element_blank()) +
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank()) +
+  scale_color_manual(values = wes_palette("FantasticFox1", n = 3, type = "continuous")) +
+  geom_hline(yintercept = 0, color = "lightgrey") +
+  geom_vline(xintercept = 0, color = "lightgrey")
+
+
+cowplot::plot_grid(pb, nb, pe, ne)
+
+
+###Change ordination plots, without ellipse####
+
+pb <- plot_ordination(ps_prop, pcoa_bray, color="Production.Stage", shape = "treatment", title="Bray PCoA") + geom_point(size=3) +
+  theme_bw() + 
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank()) +
+  scale_color_manual(values = wes_palette("Darjeeling2", n = 13, type = "continuous")) +   theme(legend.title=element_blank()) + xlab("PC1 (23.9%)") + ylab("PC2 (15.5%)") +
+  geom_hline(yintercept = 0, color = "lightgrey") +
+  geom_vline(xintercept = 0, color = "lightgrey")
+  
+
+pe <- plot_ordination(ps_prop, pcoa_euc, color="Production.Stage", shape = "treatment", title="Euclidean PCoA") + geom_point(size=3) +
+  theme_bw() + 
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank()) +
+  scale_color_manual(values = wes_palette("Darjeeling2", n = 13, type = "continuous")) +  theme(legend.title=element_blank()) +   xlab("PC1 (45.3%)") + ylab("PC2 (18.3%)") +
+  geom_hline(yintercept = 0, color = "lightgrey") +
+  geom_vline(xintercept = 0, color = "lightgrey")
+
+
+nb <- plot_ordination(ps_prop, nmds_bray, color="Production.Stage", shape = "treatment", title="Bray NMDS") + geom_point(size=3) +
+  theme_bw() + 
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank()) +
+  scale_color_manual(values = wes_palette("Darjeeling2", n = 13, type = "continuous")) +  theme(legend.title=element_blank()) +
+  geom_hline(yintercept = 0, color = "lightgrey") +
+  geom_vline(xintercept = 0, color = "lightgrey")
+  
+
+ne <- plot_ordination(ps_prop, nmds_euc, color="Production.Stage", shape = "treatment", title="Euclidean NMDS") + geom_point(size=3) +
+  theme_bw() + 
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank()) +
+  scale_color_manual(values = wes_palette("Darjeeling2", n = 13, type = "continuous")) +  theme(legend.title=element_blank()) +
+  geom_hline(yintercept = 0, color = "lightgrey") +
+  geom_vline(xintercept = 0, color = "lightgrey")
+
+
+cowplot::plot_grid(pb, nb, pe, ne)
+
+###Ordination plots individually###
+
+##title="Bray PCoA"##
+
+plot_ordination(ps_prop, pcoa_bray, color="Production.Stage", shape = "treatment") + geom_point(size=5) +
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank()) +
+  scale_color_manual(values = wes_palette("Darjeeling2", n = 13, type = "continuous")) +   theme(legend.title=element_blank()) + xlab("PC1 (23.9%)") + ylab("PC2 (15.5%)") 
+  
+  
+   plot_ordination(ps.prop_its, ord.pcoa.bray_its, color= "Production.Stage", shape="treatment") +
+  geom_point(size=3) +
+  scale_color_manual (values = wes_palette("Darjeeling2", n = 13, type = "continuous")) +
+  theme(legend.title=element_blank()) +
+  xlab("PC1 (45.3%)") + ylab("PC2 (18.3%)") +
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank())
+  
+####title="Euclidean PCoA")###
+
+plot_ordination(ps_prop, pcoa_euc, color="Production.Stage", shape = "treatment") + geom_point(size=5) + 
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank()) +
+  scale_color_manual(values = wes_palette("Darjeeling2", n = 13, type = "continuous")) +
+  theme(legend.title=element_blank()) +
+  xlab("PC1 (45.3%)") + ylab("PC2 (18.3%)") 
+ 
+ 
+###title="Euclidean NMDS"###
+
+plot_ordination(ps_prop, nmds_euc, color="Production.Stage", shape = "treatment") + geom_point(size=5) +
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank()) +
+  scale_color_manual(values = wes_palette("Darjeeling2", n = 13, type = "continuous")) +  theme(legend.title=element_blank()) 
+  
+view("Darjeeling2")
+  
+  
+##ORDINATION PLOT USING WITH NEW COLORS##
+newSTorder =  c("Sowing surface", "Seedling surface", "Transplant surface", "Mature surface", "Liner surface", "Harvest surface", "Post-sanitation surface", "Municipal water", "Post-carbon filter", "Nutrient solution", "Seedling root", "Transplant root", "Mature root")
+
+newSTorder2 =  c("Surface", "Solution", "Root")
+
+p$data$treatment <- as.character(p$data$treatment)
+p$data$treatment <- factor(p$data$treatment, levels=newSTorder2)
+
+p$data$Production.Stage <- as.character(p$data$Production.Stage)
+p$data$Production.Stage <- factor(p$data$Production.Stage, levels=newSTorder)
+
+p 
+  
+  
+
+##Bray NMDS##
+
+p<- plot_ordination(ps_prop, nmds_bray, color="Production.Stage", shape = "treatment") + geom_point(size=5) + theme_bw()+
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank()) +
+ scale_color_manual(values = my.colors12) +  theme(legend.title=element_blank()) 
+
+
+```
+
+```{r build tree}
+Sys.time()
+
+## need a phylogeny for some analyses
+library(phangorn)
+library(DECIPHER)
+library(dada2)
+
+seqs <- getSequences(seqtab.nochim)
+names(seqs) <- seqs # This propagates to the tip labels of the tree
+alignment <- AlignSeqs(DNAStringSet(seqs), anchor=NA)
+
+phang.align <- phyDat(as(alignment, "matrix"), type="DNA")
+dm <- dist.ml(phang.align)
+treeNJ <- NJ(dm) # Note, tip order != sequence order
+fit = pml(treeNJ, data=phang.align)
+
+## negative edges length changed to 0!
+
+fitGTR <- update(fit, k=4, inv=0.2)
+fitGTR <- optim.pml(fitGTR, model="GTR", optInv=TRUE, optGamma=TRUE,
+                      rearrangement = "stochastic", control = pml.control(trace = 0))
+detach("package:phangorn", unload=TRUE)
+
+## if you skip tree building, you can add it to your ps object later using merge_phyloseq()
+ps_prop2 <- merge_phyloseq(ps_prop, fitGTR$tree)
+ps_prop2@phy_tree
+```
+
+```{r nmds, fig.height=8, fig.width=5}
+pcoa_uni <- ordinate(ps_prop2, method="PCoA", distance="unifrac")
+pcoa_wuni <- ordinate(ps_prop2, method="PCoA", distance="wunifrac")
+nmds_uni <- ordinate(ps_prop2, method="NMDS", distance="unifrac")
+nmds_wuni <- ordinate(ps_prop2, method="NMDS", distance="wunifrac")
+
+
+pu <- plot_ordination(ps_prop, pcoa_uni, color="treatment", shape = "treatment", title="Unifrac PCoA") + geom_point(size=3) +
+  theme_bw() + 
+  stat_ellipse() + 
+  theme(legend.title=element_blank()) +
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank()) +
+  scale_color_manual(values = wes_palette("FantasticFox1", n = 3, type = "continuous")) + xlab("PC1 (24%)") + ylab("PC2 (9%)") +
+  geom_hline(yintercept = 0, color = "lightgrey") +
+  geom_vline(xintercept = 0, color = "lightgrey")
+
+
+pw <- plot_ordination(ps_prop, pcoa_wuni, color="treatment", shape = "treatment", title="Weighted Unifrac PCoA") + geom_point(size=3) +
+  theme_bw() + 
+  stat_ellipse() + 
+  theme(legend.title=element_blank()) +
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank()) +
+  scale_color_manual(values = wes_palette("FantasticFox1", n = 3, type = "continuous")) + xlab("PC1 (39.5%)") + ylab("PC2 (18.4%)") + 
+  geom_hline(yintercept = 0, color = "lightgrey") +
+  geom_vline(xintercept = 0, color = "lightgrey")
+
+nu <- plot_ordination(ps_prop, nmds_uni, color="treatment", shape = "treatment", title="Unifrac NMDS") + geom_point(size=3) +
+  theme_bw() + 
+  stat_ellipse() + 
+  theme(legend.title=element_blank()) +
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank()) +
+  scale_color_manual(values = wes_palette("FantasticFox1", n = 3, type = "continuous")) +
+  geom_hline(yintercept = 0, color = "lightgrey") +
+  geom_vline(xintercept = 0, color = "lightgrey")
+
+nw <- plot_ordination(ps_prop, nmds_wuni, color="treatment", shape = "treatment", title="Weighted Unifrac NMDS") + geom_point(size=3) +
+  theme_bw() + 
+  stat_ellipse() + 
+  theme(legend.title=element_blank()) +
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank()) +
+  scale_color_manual(values = wes_palette("FantasticFox1", n = 3, type = "continuous")) +
+  geom_hline(yintercept = 0, color = "lightgrey") +
+  geom_vline(xintercept = 0, color = "lightgrey")
+
+cowplot::plot_grid(pb, nb, pe, ne, pu, nu, pw, nw, ncol = 2)
+
+cowplot::plot_grid(pu, nu, pw, nw, ncol = 2)
+
+
+
+##Ordination_Unifrac_by production stage with no ellipse##
+
+pu <- plot_ordination(ps_prop, pcoa_uni, color="Production.Stage", shape = "treatment", title="Unifrac PCoA") + geom_point(size=3) +
+  theme_bw() + 
+  theme(legend.title=element_blank()) +
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank()) +
+  scale_color_manual(values = wes_palette("Darjeeling2", n = 13, type = "continuous")) + xlab("PC1 (24%)") + ylab("PC2 (9%)") +   
+  geom_hline(yintercept = 0, color = "lightgrey") +
+  geom_vline(xintercept = 0, color = "lightgrey")
+
+pw <- plot_ordination(ps_prop, pcoa_wuni, color="Production.Stage", shape = "treatment", title="Weighted Unifrac PCoA") + geom_point(size=3) +
+  theme_bw() + theme(legend.title=element_blank()) +
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank()) +
+  scale_color_manual(values = wes_palette("Darjeeling2", n = 13, type = "continuous")) + xlab("PC1 (39.5%)") + ylab("PC2 (18.4%)") + 
+  geom_hline(yintercept = 0, color = "lightgrey") +
+  geom_vline(xintercept = 0, color = "lightgrey")
+
+nu <- plot_ordination(ps_prop, nmds_uni, color="Production.Stage", shape = "treatment", title="Unifrac NMDS") + geom_point(size=3) +
+  theme_bw() + theme(legend.title=element_blank()) +
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank()) +
+  scale_color_manual(values = wes_palette("Darjeeling2", n = 13, type = "continuous")) +
+  geom_hline(yintercept = 0, color = "lightgrey") +
+  geom_vline(xintercept = 0, color = "lightgrey")
+
+nw <- plot_ordination(ps_prop, nmds_wuni, color="Production.Stage", shape = "treatment", title="Weighted Unifrac NMDS") + geom_point(size=3) +
+  theme_bw() + theme(legend.title=element_blank()) +
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank()) +
+  scale_color_manual(values = wes_palette("Darjeeling2", n = 13, type = "continuous")) +
+  geom_hline(yintercept = 0, color = "lightgrey") +
+  geom_vline(xintercept = 0, color = "lightgrey")
+
+cowplot::plot_grid(pu, nu, pw, nw, ncol = 2)
+
+##Ordination_Unifrac_by production stage individually##
+
+
+##title="Unifrac PCoA"##
+
+plot_ordination(ps_prop, pcoa_uni, color="Production.Stage", shape = "treatment") + geom_point(size=5) +
+  theme(legend.title=element_blank()) +
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank()) +
+  scale_color_manual(values = wes_palette("Darjeeling2", n = 13, type = "continuous")) + xlab("PC1 (24%)") + ylab("PC2 (9%)") 
+  
+###title="Weighted Unifrac PCoA"###
+
+plot_ordination(ps_prop, pcoa_wuni, color="Production.Stage", shape = "treatment") + geom_point(size=5) + theme(legend.title=element_blank()) +
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank()) +
+  scale_color_manual(values = wes_palette("Darjeeling2", n = 13, type = "continuous")) + xlab("PC1 (39.5%)") + ylab("PC2 (18.4%)") 
+
+
+###title="Unifrac NMDS"###
+
+plot_ordination(ps_prop, nmds_uni, color="Production.Stage", shape = "treatment") + geom_point(size=5) + theme(legend.title=element_blank()) +
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank()) +
+  scale_color_manual(values = wes_palette("Darjeeling2", n = 13, type = "continuous"))
+  
+  
+###title="Weighted Unifrac NMDS"###
+
+plot_ordination(ps_prop, nmds_wuni, color="Production.Stage", shape = "treatment") + geom_point(size=5) + theme(legend.title=element_blank()) +
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank()) +
+  scale_color_manual(values = wes_palette("Darjeeling2", n = 13, type = "continuous"))
+
+##END OF ORDINATION PLOTS##
+
+
+
+##OLD ORDINATION PLOT CODES##
+
+#Ordination
+ps.prop <- transform_sample_counts(ps_16s, function(otu) otu/sum(otu))
+ord.nmds.bray <- ordinate(ps.prop, method="NMDS", distance="bray")
+
+##Bray NMDS plot###
+ps_16s <- phyloseq(otu_table(seqtab.nochim_16s, taxa_are_rows = FALSE), tax_table(taxa), samples_16s)
+plot_ordination(ps.prop, ord.nmds.bray, color = "Production.Stage", shape="stage", title = "Bray NMDS") + geom_point(size = 5)+ scale_color_manual (values = wes_palette("Darjeeling2", n = 13, type = "continuous")) +
+  theme(legend.title=element_blank()) +
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank()) 
+  
+   library(vegan)
+metadata <- as(samples_data(ps_16s), "Production.Stage")
+
+       
+bc <- phyloseq::distance(ps_16s, "bray")
+adonis(bc ~ Production.Stage, data = samdf_16s)
+
+bc <- phyloseq::distance(ps_16s, "bray")
+adonis(bc ~ treatment, data = samdf_16s)
+  
+#############
+
+# **Transform data to proportions as appropriate for Bray-Curtis distances
+ps.prop_16s <- transform_sample_counts(ps_16s, function(otu) otu/sum(otu))
+ord.nmds.bray_16s <- ordinate(ps.prop_16s, method="NMDS", distance="bray")
+ord.pcoa.bray_16s <- ordinate(ps.prop_16s, method="PCoA", distance="bray")
+
+pcoa_df <- as.data.frame(ord.pcoa.bray_16s$vectors)
+pcoa_df$merge <- rownames(pcoa_df)
+pcoa_df_factors <- merge(pcoa_df, samdf_16s, by = "merge")
+
+PC1_hs <- lm(Axis.1 ~ Production.Stage, data = pcoa_df_factors)
+summary(PC1_hs)
+
+ord.nmds.bray_16s <- ordinate(ps.prop_16s, method="PCoA", distance="bray")
+plot_ordination(ps.prop_16s, ord.pcoa.bray_16s, color= "Production.Stage", shape="treatment")
+
+
+plot_ordination(ps.prop_16s, ord.pcoa.bray_16s, color= "Production.Stage", shape="treatment") +
+  geom_point(size=5) +
+scale_color_manual (values = wes_palette("Darjeeling2", n = 11, type = "continuous")) +
+  theme(legend.title=element_blank()) +
+  xlab("PC1 (23.9%)") + ylab("PC2 (15.5%)") +
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank())
+  
+  
+  #####Beta diversity stats##### #ADONIS#
+library(vegan)
+metadata <- as(samples_data(ps_16s), "Production.Stage")
+
+adonis(distance(ps_16s, method="bray") ~ "Production.Stage",
+       data = metadata)
+
+bc <- phyloseq::distance(ps_16s, "bray")
+adonis(bc ~ Production.Stage, data = metadata)
+
+estimate_richness(metadata, "Shannon", "Simpson")
+
+####p-value for PCoA graph#####
+bc <- phyloseq::distance(ps_16s, "bray")
+adonis(bc ~ Production.Stage, data = metadata)
+  
+save(ps_16s, "ps_16s.RData") 
+
+plot_heatmap(melted_16s, taxa.label="Phylum")
+ 
+##annotate("text", x = 0.25, y = 0.5, label = "F-statistic: 0.099; p-value: 0.755", colour = "darkgrey")##
+##ggsave("plots/bacteria_pcoa_heatshock.tiff", dpi = 400)##
+##Format legend##
+##theme(legend.position = c(0.85, 0.87), legend.background=element_blank())##
+
+if (!requireNamespace("BiocManager", quietly = TRUE))
+  install.packages("BiocManager")
+
+BiocManager::install("DESeq2")
+
+library (DESeq2)
+
+##Beta diversity##
+###make deseq2 object; transform table; calculate euclidian distance###
+deseq_counts <- DESeqDataSetFromMatrix(count_tab, colData = treatment, design = ~Production.Stage)
+deseq_counts <- estimateSizeFactors(deseq_counts, type = "poscounts")
+deseq_counts_vst <- varianceStabilizingTransformation(deseq_counts)
+vst_trans_count_tab <- assay(deseq_counts_vst)
+euc_dist <- dist(t(vst_trans_count_tab))
+
+euc_clust <- hclust(euc_dist, method="ward.D2")
+plot(euc_clust)
+
+euc_dend <- as.dendrogram(euc_clust, hang=0.1)
+dend_cols <- as.character(sample_info_tab$color[order.dendrogram(euc_dend)])
+labels_colors(euc_dend) <- dend_cols
+
+plot(euc_dend, ylab="VST Euc. dist.")
+legend("topright",
+       legend = c("Astrotech Heatshock", "Astrotech No Heatshock", "Lockheed Heatshock", "Lockheed No Heatshock", "Control"),
+       col=c("red", "blue", "red4", "blue4", "grey"), lty = 1, lwd = 5, cex = 0.8)
+
+# making our phyloseq object with transformed table
+vst_count_phy <- otu_table(vst_trans_count_tab, taxa_are_rows=T)
+sample_info_tab_phy <- sample_data(sample_info_tab)
+vst_physeq <- phyloseq(vst_count_phy, sample_info_tab_phy)
+
+# generating and visualizing the PCoA with phyloseq
+vst_pcoa <- ordinate(vst_physeq, method="MDS", distance="euclidean")
+eigen_vals <- vst_pcoa$values$Eigenvalues # allows us to scale the axes according to their magnitude of separating apart the samples
+
+plot_ordination(vst_physeq, vst_pcoa, color="Heatshock") +
+  geom_point(size=1) + labs(col="Heatshock") +
+  geom_label_repel(aes(label=sample_info_tab$Sample)) +
+  coord_fixed(sqrt(eigen_vals[2]/eigen_vals[1])) + ggtitle("PCoA") +
+  scale_color_manual(values=unique(sample_info_tab$color[order(sample_info_tab$Heatshock)])) +
+  theme(legend.position="none")
+
+g1 <- ggplot(ps_16s, aes(x = Production.Site, stage)) +
+  geom_tile(aes(fill = melted_its))
+g1
+
+
+##HeatMap##
+##Top100 Genus##
+melted_16s$Genus <- gsub('g__', '', melted_16s$Genus)
+genus_counts <- aggregate(melted_16s$Abundance, by=list(Category=melted_16s$Genus), FUN=sum)
+gc_reorder <- genus_counts[order(-genus_counts$x),]
+top100_genus <- NULL
+top100_genus$Genus <- head(gc_reorder$Category, 100)
+top100_melted <- subset(melted_16s, Genus %in% top100_genus$Genus)
+
+melted_16s <- psmelt(ps_16s)
+
+
+mine.long <- pivot_longer(data = top100_melted, 
+                    cols = -c(OTU, Sample, Abundance, Kingdom, Phylum, Class, Order, Family, Genus), 
+                    names_to = "Genus", 
+                    values_to = "Abundance")
+
+mine.heatmap <- ggplot(data = mine.long, mapping = aes(x = Sample,
+                                                       y = Genus,
+                                                       fill = Abundance)) +
+  geom_tile() +
+  xlab(label = "Production.Stage")
+
+mine.heatmap
+
+##Heatmap_retry##
+
+mine.heatmap <- ggplot(data=ps_16s, mapping = aes(x = site,
+                                                         y = ASV,
+                                                         fill = Abundance)) +
+  geom_tile() +
+  xlab(label = "site")
+mine.heatmap
+
+install.packages('treeheatr')
+library(treeheatr)
+
+heat_tree(ps_16s, target_lab = 'Production.Stage')
+
+library(phytools)
+packageVersion("phytools")
+
+phylo.heatmap(itsx,
+    split=c(0.7,0.3),fsize=c(0.4,0.8,0.8),
+    standardize=TRUE)
+    
+par(mar=c(5.1,4.1,4.1,2.1))
+
+
+###HEATMAP THAT does not WORK####
+
+taxi.mi<- prune_taxa(names(sort(taxa_sums(ps_its),TRUE)[1:300]),ps_its)
+plot_heatmap(taxi.mi, merge.label="site")
+
+
+##TREE####
+
+plot_tree(ps_16s, color = "stage", label.tips = "Production.Stage", size = "abundance", plot.margin = 0.5, ladderize = TRUE)
+
+
+plot_heatmap(top50_melted, sample.label="Production.Stage", taxa.label="Genus", sample order="Genus")
+
+##Large phylogenetic tree###
+library(metacoder)
+itsx <- parse_phyloseq(ps_16s)
+heat_tree(itsx, node_size = n_obs, node_color = n_obs, node_label = taxon_names, title = "Bacteria",
+          margin_size = c(0.1, 0.1, 0.1, 0.1), title_size = 0.04, node_label_size = 0.2,
+          output_file = "16s_tree.pdf")
+          
+          
+samdf_mod <- samdf
+samdf_mod$sample_id <- rownames(samdf)
+rownames(samdf_mod) <- NULL
+itsx$data$otu_table <- calc_obs_props(itsx, data = "otu_table", cols = samdf_mod$sample_id)
+compare_groups(itsx, data = "otu_table", cols = samdf_mod$sample_id, groups = samdf_mod$Part)
+
+
+###export OTU table###
+ASV = as(otu_table(ps_16s), "matrix")
+# transpose if necessary
+if(taxa_are_rows(ps_16s)){ASV <- t(ASV)}
+# Coerce to data.frame
+ASVdf = as.data.frame(ASV)
+write.csv(ASVdf, file='ASV_maple_16s.csv')
+
+glom <- tax_glom(ps_its, taxrank = 'Species')
+#create dataframe from phyloseq object
+dat <- psmelt(glom)
+#convert Class to a character vector from a factor
+dat$Species <- as.character(dat$Species)
+#aggregate
+Species_abundance <- aggregate(Abundance~Sample+Species, dat, FUN=sum)
+#reorganize the table so that each Class is a column
+library(reshape)
+Species_abundance <- cast(Species_abundance, Sample ~ Species)
+#how to transpose file
+Species_abundance <- t(Species_abundance)
+write.csv(Species_abundance, file='Species_abundance.csv')
+
+
+
+
+##install DECIPHER##
+if (!requireNamespace("BiocManager", quietly = TRUE))
+  install.packages("BiocManager")
+
+BiocManager::install("DECIPHER")
+
+
+
+###Create a phylogenetic tree####
+library(doParallel); packageVersion("doParallel")
+library(foreach); packageVersion("foreach")
+library(DECIPHER)
+library(phangorn)
+library(dada2)
+#Create multiple denovo alignment
+seqs <- getSequences(taxa)
+names(seqs) <- seqs # This propagates to the tip labels of the tree
+alignment <- AlignSeqs(DNAStringSet(seqs), anchor=NA,verbose=FALSE)
+
+#construct a neighbor-joining tree, and then fit a Generalized time-reversible with Gamma rate variation
+#maximum likelihood tree using the neighbor-joining tree as a starting point.
+phangAlign <- phyDat(as(alignment, "matrix"), type="DNA")
+dm <- dist.ml(phangAlign)
+treeNJ <- NJ(dm) # Note, tip order != sequence order
+fit = pml(treeNJ, data=phangAlign)
+fitGTR <- update(fit, k=4, inv=0.2)
+fitGTR <- optim.pml(fitGTR,model="GTR", optInv=TRUE, optGamma=TRUE,
+                    rearrangement = "stochastic", control = pml.control(trace = 0))
+detach("package:phangorn", unload=TRUE)
+
+#Don't run dplyr until you run the tree, tree builds phyloseq object, need for UniFrac)#
+
+library(dplyr)
+ps_its <- phyloseq(otu_table(seqtab.nochim_its, taxa_are_rows=FALSE),
+                     samples_its,
+                     tax_table(taxa),phy_tree(fitGTR$tree))
+
+
+
+plot_tree(ps_its, ladderize = TRUE, label.tips = "taxa", ladderize="left")
+rlang::last_error()
+plot_tree(ps_its, ladderize = TRUE, color="site")
+
+###Heat map####
+plot_heatmap(ps_its, taxa.label="Genus")
+plot_heatmap(ps_its, sample.label="site", species.label="Genus")
+
+
+
+References
+Programs:
+ 
+  Databases:
+
+
+
+##############################################################
+
+
+###Create a tree####
+library(doParallel); packageVersion("doParallel")
+library(foreach); packageVersion("foreach")
+library(DECIPHER)
+library(phangorn)
+library(dada2)
+#Create multiple denovo alignment
+seqs <- getSequences(taxa)
+names(seqs) <- seqs # This propagates to the tip labels of the tree
+alignment <- AlignSeqs(DNAStringSet(seqs), anchor=NA,verbose=FALSE)
+
+#construct a neighbor-joining tree, and then fit a Generalized time-reversible with Gamma rate variation
+#maximum likelihood tree using the neighbor-joining tree as a starting point.
+phangAlign <- phyDat(as(alignment, "matrix"), type="DNA")
+dm <- dist.ml(phangAlign)
+treeNJ <- NJ(dm) # Note, tip order != sequence order
+fit = pml(treeNJ, data=phangAlign)
+fitGTR <- update(fit, k=4, inv=0.2)
+fitGTR <- optim.pml(fitGTR,model="GTR", optInv=TRUE, optGamma=TRUE,
+                    rearrangement = "stochastic", control = pml.control(trace = 0))
+detach("package:phangorn", unload=TRUE)
+
+#Don't run dplyr until you run the tree, tree builds phyloseq object, need for UniFrac)#
+
+library(dplyr)
+ps_maple <- phyloseq(otu_table(seqtab.nochim, taxa_are_rows=FALSE), 
+                     sample_data(metadata), 
+                     tax_table(taxa),phy_tree(fitGTR$tree))
+#remove non-target
+ps_maple<-ps_maple %>%
+  subset_taxa(
+    Kingdom == 'Bacteria' &
+      Family != "mitochondria" &
+      Class != "Chloroplast")
+
+ps_maple <-prune_samples(sample_names(ps_maple) != "RID496Zymo", ps_maple)
+
+library(decontam)
+
+sample_data(ps_maple)$is.neg <- sample_data(ps_maple)$Sample_or_control == "control" 
+contamdf.prev <- isContaminant(ps_maple, method="prevalence", neg="is.neg")
+table(contamdf.prev$contaminant)
+
+ps_maple.neg <- prune_samples(sample_data(ps_maple)$Sample_or_control == "control", ps_maple)
+ps_maple.neg.presence <- transform_sample_counts(ps_maple.neg, function(abund) 1*(abund>0))
+ps_maple.pos <- prune_samples(sample_data(ps_maple)$Sample_or_control == "sample", ps_maple)
+ps_maple.pos.presence <- transform_sample_counts(ps_maple.pos, function(abund) 1*(abund>0))
+
+df.pres <- data.frame(prevalence.pos=taxa_sums(ps_maple.pos.presence), prevalence.neg=taxa_sums(ps_maple.neg.presence),
+                      contam.prev=contamdf.prev$contaminant)
+
+write.csv(df.pres, file='contaminants.csv')
+
+#remove contaminants from phyloseq. Make sure to only select sequences that belong to controls!
+BadTaxa<- c("TACGAAGGGGGCTAGCGTTGCTCGGAATCACTGGGCGTAAAGGGTGCGTAGGCGGGTCTTTAAGTCAGGGGTGAAATCCTGGAGCTCAACTCCAGAACTGCCTTTGATACTGAAGATCTTGAGTTCGGGAGAGGTGAGTGGAACTGCGAGTGTAGAGGTGAAATTCGTAGATATTCGCAAGAACACCAGTGGCGAAGGCGGCTCACTGGCCCGATACTGACGCTGAGGCACGAAAGCGTGGGGAGCAAACAGG","TACAGAGGGTGCAAGCGTTAATCGGAATTACTGGGCGTAAAGCGCGCGTAGGTGGTTAGTTAAGTTGGATGTGAAATCCCCGGGCTCAACCTGGGAACTGCATTCAAAACTGACTGACTAGAGTATGGTAGAGGGTGGTGGAATTTCCTGTGTAGCGGTGAAATGCGTAGATATAGGAAGGAACACCAGTGGCGAAGGCGACCACCTGGACTGATACTGACACTGAGGTGCGAAAGCGTGGGGAGCAAACAGG","TACGGAGGATGCGAGCGTTATCCGGATTTATTGGGTTTAAAGGGAGCGCAGACGGGGGGTTAAGTCAGCTGTGAAAGTTTGCGGCTCAACCGTAAAATTGCAGTTGATACTGGCCCTCTTGAGTGCAGTTGAGGTAGGCGGAATTCGTGGTGTAGCGGTGAAATGCTTAGATATCACGAAGAACTCCGATTGCGAAGGCAGCTTACTAAACTGTAACTGACGTTCATGCTCGAAAGTGTGGGTATCAAACAGG","TACGTAGGGTGCAAGCGTTAATCGGAATTACTGGGCGTAAAGCGTGCGCAGGCGGTTATGCAAGACAGAGGTGAAATCCCCGGGCTCAACCTGGGAACTGCCTTTGTGACTGCATGGCTAGAGTACGGTAGAGGGGGATGGAATTCCGCGTGTAGCAGTGAAATGCGTAGATATGCGGAGGAACACCGATGGCGAAGGCAATCCCCTGGACCTGTACTGACGCTCATGCACGAAAGCGTGGGGAGCAAACAGG")
+
+allTaxa = taxa_names(ps_maple)
+allTaxa <- allTaxa[!(allTaxa %in% BadTaxa)]
+ps_maple= prune_taxa(allTaxa, ps_maple)
+ps_maple
+
+
+
+###export OTU table###
+ASV = as(otu_table(ps_maple), "matrix")
+# transpose if necessary
+if(taxa_are_rows(ps_maple)){ASV <- t(ASV)}
+# Coerce to data.frame
+ASVdf = as.data.frame(ASV)
+write.csv(ASVdf, file='ASV_maple.csv')
+
+glom <- tax_glom(ps_maple, taxrank = 'Genus')
+#create dataframe from phyloseq object
+dat <- psmelt(glom)
+#convert Class to a character vector from a factor
+dat$Genus <- as.character(dat$Genus)
+#aggregate
+Genus_abundance <- aggregate(Abundance~Sample+Genus, dat, FUN=sum)
+#reorganize the table so that each Class is a column
+library(reshape)
+Genus_abundance <- cast(Genus_abundance, Sample ~ Genus)
+#how to transpose file
+Genus_abundance <- t(Genus_abundance)
+write.csv(Genus_abundance, file='Genus_abundance.csv')
+
+##Export Phylum##
+glom <- tax_glom(ps_its, taxrank = 'Phylum')
+#create dataframe from phyloseq object
+dat <- psmelt(glom)
+#convert Class to a character vector from a factor
+dat$Phylum <- as.character(dat$Phylum)
+#aggregate
+Phylum_abundance <- aggregate(Abundance~Sample+Phylum, dat, FUN=sum)
+#reorganize the table so that each Class is a column
+library(reshape)
+Phylum_abundance <- cast(Phylum_abundance, Sample ~ Phylum)
+#how to transpose file
+Phylum_abundance <- t(Phylum_abundance)
+write.csv(Phylum_abundance, file='Phylum_abundance_16S.csv')
+
+
+#barplot
+top10 <- names(sort(taxa_sums(ps_maple), decreasing=TRUE))[1:10]
+ps.top10 <- transform_sample_counts(ps_maple, function(OTU) OTU/sum(OTU))
+ps.top10 <- prune_taxa(top10, ps.top10)
+
+#How to remove OTU lines, black ugly lines!
+plot_bar(ps_maple, x="Production.Stage", fill="Phylum") + geom_bar(aes(color=Phylum, fill=Phylum), stat="identity", position="stack")
+
+#Plot richness
+plot_richness(ps_maple, x="Sample", measures=c("Shannon", "Simpson"), color="Production.Stage") + geom_point(size=4)
+plot_richness(ps_maple, x="Grouping", measures=c("Shannon", "Simpson"), color="Production.Stage") + geom_point(size=4)
+
+#Ordination
+ps.prop <- transform_sample_counts(ps, function(otu) otu/sum(otu))
+ord.nmds.bray <- ordinate(ps.prop, method="NMDS", distance="bray")
+
+ps_maple <- phyloseq(otu_table(seqtab.nochim, taxa_are_rows = FALSE), tax_table(taxa), sample_data(meta))
+plot_ordination(ps.prop, ord.nmds.bray, color = "Production.Stage", shape = "Grouping", title = "Bray NMDS") + geom_point(size = 4) + theme(panel.background = element_blank(), legend.background = element_blank())
+
+
+#How to remove OTU lines, black ugly lines!
+plot_bar(melted_its, x="site", fill="Genus") + geom_bar(aes(color=Genus, fill=Genus), stat="identity", position="stack")
